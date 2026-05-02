@@ -1,0 +1,685 @@
+loadstring([[
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+local Config = {
+    AimbotAtivo = false, FOV = 800, DistanciaMax = 1000,
+    VerificarTime = true, Predicao = true, PredicaoValor = 0.35, SempreAtivo = false,
+    Suavidade = 0
+}
+
+local Mirando = false
+local AlvoAtual = nil
+local ComArma = false
+local ArmaAtual = "Nenhuma"
+local CacheVelocidade = {}
+local UltimasPosicoes = {}
+local Amigos = {}
+
+local function EhTime(plr)
+    if not Config.VerificarTime then return false end
+    if not plr.Team or not LocalPlayer.Team then return false end
+    return plr.Team == LocalPlayer.Team
+end
+
+local function EhAmigo(nome) return Amigos[nome] == true end
+
+local function VerificarArmaNaMao()
+    local char = LocalPlayer.Character
+    if not char then ComArma = false; ArmaAtual = "Nenhuma"; return false end
+    for _, item in pairs(char:GetChildren()) do
+        if item:IsA("Tool") then ComArma = true; ArmaAtual = item.Name; return true end
+    end
+    ComArma = false; ArmaAtual = "Nenhuma"; return false
+end
+
+task.spawn(function()
+    while task.wait(0.05) do pcall(VerificarArmaNaMao) end
+end)
+
+task.spawn(function()
+    while task.wait(0.033) do
+        pcall(function()
+            for _, plr in pairs(Players:GetPlayers()) do
+                if plr ~= LocalPlayer and plr.Character then
+                    local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        if UltimasPosicoes[plr] then CacheVelocidade[plr] = (hrp.Position - UltimasPosicoes[plr]) * 30 end
+                        UltimasPosicoes[plr] = hrp.Position
+                    end
+                end
+            end
+        end)
+    end
+end)
+
+local function CalcularPredicao(plr, cabeca)
+    if not Config.Predicao then return cabeca.Position end
+    local vel = CacheVelocidade[plr]
+    if not vel or vel.Magnitude < 0.1 then return cabeca.Position end
+    local dist = (Camera.CFrame.Position - cabeca.Position).Magnitude
+    return cabeca.Position + (vel * (dist / 800) * Config.PredicaoValor)
+end
+
+local function BuscarAlvo()
+    local telaCentro = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    local melhorAlvo, menorDistTela = nil, Config.FOV + 1
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character and not EhTime(plr) and not EhAmigo(plr.Name) then
+            local hum, cabeca = plr.Character:FindFirstChild("Humanoid"), plr.Character:FindFirstChild("Head")
+            if hum and cabeca and hum.Health > 0 then
+                local meuHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if not meuHRP then continue end
+                if (meuHRP.Position - cabeca.Position).Magnitude > Config.DistanciaMax then continue end
+                local posTela = Camera:WorldToViewportPoint(cabeca.Position)
+                local dist2D = (Vector2.new(posTela.X, posTela.Y) - telaCentro).Magnitude
+                if dist2D <= Config.FOV and dist2D < menorDistTela then
+                    menorDistTela, melhorAlvo = dist2D, {Jogador = plr, Cabeca = cabeca}
+                end
+            end
+        end
+    end
+    return melhorAlvo
+end
+
+RunService.RenderStepped:Connect(function()
+    if not Config.AimbotAtivo or not Mirando then AlvoAtual = nil; return end
+    if not Config.SempreAtivo and not ComArma then return end
+    if AlvoAtual and AlvoAtual.Jogador and AlvoAtual.Jogador.Character then
+        local cabeca, hum = AlvoAtual.Jogador.Character:FindFirstChild("Head"), AlvoAtual.Jogador.Character:FindFirstChild("Humanoid")
+        if cabeca and hum and hum.Health > 0 and not EhTime(AlvoAtual.Jogador) then
+            local pos = CalcularPredicao(AlvoAtual.Jogador, cabeca)
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, pos)
+            return
+        else AlvoAtual = nil end
+    end
+    local novoAlvo = BuscarAlvo()
+    if novoAlvo then AlvoAtual = novoAlvo; Camera.CFrame = CFrame.new(Camera.CFrame.Position, CalcularPredicao(AlvoAtual.Jogador, AlvoAtual.Cabeca)) end
+end)
+
+local GUI = Instance.new("ScreenGui")
+GUI.Name = "FluidHub"
+GUI.ResetOnSpawn = false
+GUI.Parent = game.CoreGui
+
+local Main = Instance.new("Frame")
+Main.Size = UDim2.new(0, 580, 0, 520)
+Main.Position = UDim2.new(0.5, -290, 0.5, -260)
+Main.BackgroundColor3 = Color3.fromRGB(6, 6, 14)
+Main.BackgroundTransparency = 0.05
+Main.BorderSizePixel = 0
+Main.ClipsDescendants = true
+Main.Active = true
+Main.Draggable = true
+Main.Visible = true
+Main.Parent = GUI
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 20)
+MainCorner.Parent = Main
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Thickness = 2
+MainStroke.Color = Color3.fromRGB(180, 0, 255)
+MainStroke.Transparency = 0.35
+MainStroke.Parent = Main
+
+local Header = Instance.new("Frame")
+Header.Size = UDim2.new(1, -30, 0, 70)
+Header.Position = UDim2.new(0, 15, 0, 12)
+Header.BackgroundColor3 = Color3.fromRGB(10, 10, 20)
+Header.BackgroundTransparency = 0.4
+Header.BorderSizePixel = 0
+Header.Parent = Main
+
+local HeaderCorner = Instance.new("UICorner")
+HeaderCorner.CornerRadius = UDim.new(0, 14)
+HeaderCorner.Parent = Header
+
+local Logo = Instance.new("Frame")
+Logo.Size = UDim2.new(0, 50, 0, 50)
+Logo.Position = UDim2.new(0, 15, 0.5, -25)
+Logo.BackgroundColor3 = Color3.fromRGB(180, 0, 255)
+Logo.BackgroundTransparency = 0.15
+Logo.BorderSizePixel = 0
+Logo.Parent = Header
+
+local LogoCorner = Instance.new("UICorner")
+LogoCorner.CornerRadius = UDim.new(0, 12)
+LogoCorner.Parent = Logo
+
+local LogoText = Instance.new("TextLabel")
+LogoText.Size = UDim2.new(1, 0, 1, 0)
+LogoText.BackgroundTransparency = 1
+LogoText.Text = "⚡"
+LogoText.TextSize = 28
+LogoText.Font = Enum.Font.GothamBlack
+LogoText.TextColor3 = Color3.fromRGB(180, 0, 255)
+LogoText.Parent = Logo
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(0, 280, 0, 30)
+Title.Position = UDim2.new(0, 80, 0, 10)
+Title.BackgroundTransparency = 1
+Title.Text = "Quem nao xit"
+Title.TextSize = 18
+Title.Font = Enum.Font.GothamBlack
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = Header
+
+local Subtitle = Instance.new("TextLabel")
+Subtitle.Size = UDim2.new(0, 280, 0, 22)
+Subtitle.Position = UDim2.new(0, 80, 0, 36)
+Subtitle.BackgroundTransparency = 1
+Subtitle.Text = "nao brilha"
+Subtitle.TextSize = 14
+Subtitle.Font = Enum.Font.GothamBlack
+Subtitle.TextColor3 = Color3.fromRGB(180, 0, 255)
+Subtitle.TextXAlignment = Enum.TextXAlignment.Left
+Subtitle.Parent = Header
+
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 32, 0, 32)
+CloseBtn.Position = UDim2.new(1, -45, 0.5, -16)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+CloseBtn.Text = "✕"
+CloseBtn.TextSize = 16
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+CloseBtn.BorderSizePixel = 0
+CloseBtn.AutoButtonColor = false
+CloseBtn.Parent = Header
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 10)
+CloseCorner.Parent = CloseBtn
+CloseBtn.MouseButton1Click:Connect(function() Main.Visible = false end)
+
+local Categories = {"🎯 AIMBOT", "⭐ AMIGOS"}
+local CatButtons = {}
+local CurrentCat = nil
+
+local CatContainer = Instance.new("Frame")
+CatContainer.Size = UDim2.new(0, 145, 1, -95)
+CatContainer.Position = UDim2.new(0, 15, 0, 90)
+CatContainer.BackgroundTransparency = 1
+CatContainer.Parent = Main
+
+local ContentArea = Instance.new("Frame")
+ContentArea.Size = UDim2.new(1, -175, 1, -95)
+ContentArea.Position = UDim2.new(0, 165, 0, 90)
+ContentArea.BackgroundTransparency = 1
+ContentArea.Parent = Main
+
+local function CriarAba(nome, icone, ordem)
+    local Btn = Instance.new("TextButton")
+    Btn.Size = UDim2.new(1, 0, 0, 48)
+    Btn.Position = UDim2.new(0, 0, 0, ordem * 56)
+    Btn.BackgroundColor3 = Color3.fromRGB(12, 12, 22)
+    Btn.BackgroundTransparency = 0.5
+    Btn.Text = ""
+    Btn.BorderSizePixel = 0
+    Btn.AutoButtonColor = false
+    Btn.Parent = CatContainer
+    
+    local BtnCorner = Instance.new("UICorner")
+    BtnCorner.CornerRadius = UDim.new(0, 12)
+    BtnCorner.Parent = Btn
+    
+    local Icon = Instance.new("TextLabel")
+    Icon.Size = UDim2.new(0, 32, 0, 32)
+    Icon.Position = UDim2.new(0, 10, 0.5, -16)
+    Icon.BackgroundTransparency = 1
+    Icon.Text = icone
+    Icon.TextSize = 18
+    Icon.Parent = Btn
+    
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(1, -50, 1, 0)
+    Label.Position = UDim2.new(0, 50, 0, 0)
+    Label.BackgroundTransparency = 1
+    Label.Text = nome
+    Label.TextColor3 = Color3.fromRGB(180, 180, 200)
+    Label.TextSize = 13
+    Label.Font = Enum.Font.GothamSemibold
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Parent = Btn
+    
+    local Content = Instance.new("ScrollingFrame")
+    Content.Size = UDim2.new(1, -10, 1, -10)
+    Content.Position = UDim2.new(0, 5, 0, 5)
+    Content.BackgroundColor3 = Color3.fromRGB(8, 8, 18)
+    Content.BackgroundTransparency = 0.3
+    Content.BorderSizePixel = 0
+    Content.ScrollBarThickness = 4
+    Content.ScrollBarImageColor3 = Color3.fromRGB(180, 0, 255)
+    Content.Visible = false
+    Content.Parent = ContentArea
+    
+    local ContentCorner = Instance.new("UICorner")
+    ContentCorner.CornerRadius = UDim.new(0, 14)
+    ContentCorner.Parent = Content
+    
+    local Layout = Instance.new("UIListLayout")
+    Layout.Padding = UDim.new(0, 10)
+    Layout.SortOrder = Enum.SortOrder.LayoutOrder
+    Layout.Parent = Content
+    
+    Layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        Content.CanvasSize = UDim2.new(0, 0, 0, Layout.AbsoluteContentSize.Y + 15)
+    end)
+    
+    Btn.MouseButton1Click:Connect(function()
+        for _, btn in pairs(CatButtons) do
+            btn.Btn.BackgroundTransparency = 0.5
+            btn.Label.TextColor3 = Color3.fromRGB(180, 180, 200)
+            btn.Content.Visible = false
+        end
+        Btn.BackgroundTransparency = 0.15
+        Label.TextColor3 = Color3.fromRGB(255, 255, 255)
+        Content.Visible = true
+        CurrentCat = nome
+    end)
+    
+    table.insert(CatButtons, {Btn = Btn, Label = Label, Content = Content})
+    return Content
+end
+
+local function CriarSecao(parent, texto)
+    local Secao = Instance.new("Frame")
+    Secao.Size = UDim2.new(1, -10, 0, 34)
+    Secao.BackgroundColor3 = Color3.fromRGB(180, 0, 255)
+    Secao.BackgroundTransparency = 0.85
+    Secao.LayoutOrder = #parent:GetChildren()
+    Secao.Parent = parent
+    
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 10)
+    Corner.Parent = Secao
+    
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(1, -20, 1, 0)
+    Label.Position = UDim2.new(0, 15, 0, 0)
+    Label.BackgroundTransparency = 1
+    Label.Text = texto
+    Label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Label.TextSize = 12
+    Label.Font = Enum.Font.GothamBold
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Parent = Secao
+end
+
+local function CriarToggle(parent, texto, padrao, callback)
+    local Frame = Instance.new("Frame")
+    Frame.Size = UDim2.new(1, -10, 0, 44)
+    Frame.BackgroundColor3 = Color3.fromRGB(14, 14, 24)
+    Frame.BackgroundTransparency = 0.4
+    Frame.LayoutOrder = #parent:GetChildren()
+    Frame.Parent = parent
+    
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 10)
+    Corner.Parent = Frame
+    
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(0.7, 0, 1, 0)
+    Label.Position = UDim2.new(0, 12, 0, 0)
+    Label.BackgroundTransparency = 1
+    Label.Text = texto
+    Label.TextColor3 = Color3.fromRGB(230, 230, 240)
+    Label.TextSize = 12
+    Label.Font = Enum.Font.Gotham
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Parent = Frame
+    
+    local Switch = Instance.new("Frame")
+    Switch.Size = UDim2.new(0, 48, 0, 24)
+    Switch.Position = UDim2.new(1, -62, 0.5, -12)
+    Switch.BackgroundColor3 = padrao and Color3.fromRGB(180, 0, 255) or Color3.fromRGB(45, 45, 60)
+    Switch.BorderSizePixel = 0
+    Switch.Parent = Frame
+    
+    local SwitchCorner = Instance.new("UICorner")
+    SwitchCorner.CornerRadius = UDim.new(1, 0)
+    SwitchCorner.Parent = Switch
+    
+    local Knob = Instance.new("Frame")
+    Knob.Size = UDim2.new(0, 20, 0, 20)
+    Knob.Position = padrao and UDim2.new(1, -23, 0.5, -10) or UDim2.new(0, 3, 0.5, -10)
+    Knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    Knob.BorderSizePixel = 0
+    Knob.Parent = Switch
+    
+    local KnobCorner = Instance.new("UICorner")
+    KnobCorner.CornerRadius = UDim.new(1, 0)
+    KnobCorner.Parent = Knob
+    
+    local Button = Instance.new("TextButton")
+    Button.Size = UDim2.new(1, 0, 1, 0)
+    Button.BackgroundTransparency = 1
+    Button.Text = ""
+    Button.Parent = Frame
+    
+    local estado = padrao
+    Button.MouseButton1Click:Connect(function()
+        estado = not estado
+        TweenService:Create(Switch, TweenInfo.new(0.15), {BackgroundColor3 = estado and Color3.fromRGB(180, 0, 255) or Color3.fromRGB(45, 45, 60)}):Play()
+        TweenService:Create(Knob, TweenInfo.new(0.15), {Position = estado and UDim2.new(1, -23, 0.5, -10) or UDim2.new(0, 3, 0.5, -10)}):Play()
+        callback(estado)
+    end)
+end
+
+local function CriarSlider(parent, texto, min, max, padrao, callback)
+    local Frame = Instance.new("Frame")
+    Frame.Size = UDim2.new(1, -10, 0, 64)
+    Frame.BackgroundColor3 = Color3.fromRGB(14, 14, 24)
+    Frame.BackgroundTransparency = 0.4
+    Frame.LayoutOrder = #parent:GetChildren()
+    Frame.Parent = parent
+    
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 10)
+    Corner.Parent = Frame
+    
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(1, -70, 0, 20)
+    Label.Position = UDim2.new(0, 12, 0, 6)
+    Label.BackgroundTransparency = 1
+    Label.Text = texto .. ": " .. padrao
+    Label.TextColor3 = Color3.fromRGB(230, 230, 240)
+    Label.TextSize = 11
+    Label.Font = Enum.Font.Gotham
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Parent = Frame
+    
+    local ValueBox = Instance.new("TextLabel")
+    ValueBox.Size = UDim2.new(0, 50, 0, 24)
+    ValueBox.Position = UDim2.new(1, -64, 0, 4)
+    ValueBox.BackgroundColor3 = Color3.fromRGB(180, 0, 255)
+    ValueBox.BackgroundTransparency = 0.15
+    ValueBox.Text = tostring(padrao)
+    ValueBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+    ValueBox.TextSize = 11
+    ValueBox.Font = Enum.Font.GothamBold
+    ValueBox.Parent = Frame
+    
+    local Track = Instance.new("Frame")
+    Track.Size = UDim2.new(1, -24, 0, 5)
+    Track.Position = UDim2.new(0, 12, 1, -18)
+    Track.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
+    Track.BorderSizePixel = 0
+    Track.Parent = Frame
+    
+    local TrackCorner = Instance.new("UICorner")
+    TrackCorner.CornerRadius = UDim.new(1, 0)
+    TrackCorner.Parent = Track
+    
+    local Fill = Instance.new("Frame")
+    Fill.Size = UDim2.new((padrao - min) / (max - min), 0, 1, 0)
+    Fill.BackgroundColor3 = Color3.fromRGB(180, 0, 255)
+    Fill.BorderSizePixel = 0
+    Fill.Parent = Track
+    
+    local FillCorner = Instance.new("UICorner")
+    FillCorner.CornerRadius = UDim.new(1, 0)
+    FillCorner.Parent = Fill
+    
+    local dragging = false
+    
+    local function Update(input)
+        local percent = math.clamp((input.Position.X - Track.AbsolutePosition.X) / Track.AbsoluteSize.X, 0, 1)
+        local value = math.floor(min + ((max - min) * percent))
+        Fill.Size = UDim2.new(percent, 0, 1, 0)
+        ValueBox.Text = tostring(value)
+        Label.Text = texto .. ": " .. value
+        callback(value)
+    end
+    
+    Track.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            Update(input)
+        end
+    end)
+    
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            Update(input)
+        end
+    end)
+end
+
+local MiraTab = CriarAba("AIMBOT", "🎯", 0)
+local AmigosTab = CriarAba("AMIGOS", "⭐", 1)
+
+CriarSecao(MiraTab, "⚡ CONFIGURAÇÕES POTENTES")
+CriarToggle(MiraTab, "Ativar Aimbot", Config.AimbotAtivo, function(v) Config.AimbotAtivo = v end)
+CriarToggle(MiraTab, "Sempre Ativo", Config.SempreAtivo, function(v) Config.SempreAtivo = v end)
+CriarToggle(MiraTab, "Verificar Time", Config.VerificarTime, function(v) Config.VerificarTime = v end)
+CriarSlider(MiraTab, "Campo de Visão (FOV)", 100, 800, Config.FOV, function(v) Config.FOV = v end)
+CriarSlider(MiraTab, "Distância Máxima", 50, 1000, Config.DistanciaMax, function(v) Config.DistanciaMax = v end)
+
+CriarSecao(MiraTab, "🎯 PREDIÇÃO POTENTE")
+CriarToggle(MiraTab, "Predição Ativa", Config.Predicao, function(v) Config.Predicao = v end)
+CriarSlider(MiraTab, "Força da Predição", 10, 50, Config.PredicaoValor * 100, function(v) Config.PredicaoValor = v / 100 end)
+
+CriarSecao(AmigosTab, "⭐ LISTA DE JOGADORES")
+
+local CountLabel = Instance.new("TextLabel")
+CountLabel.Size = UDim2.new(1, -10, 0, 30)
+CountLabel.BackgroundColor3 = Color3.fromRGB(180, 0, 255)
+CountLabel.BackgroundTransparency = 0.85
+CountLabel.Text = "⭐ Amigos: 0"
+CountLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+CountLabel.TextSize = 12
+CountLabel.Font = Enum.Font.GothamBold
+CountLabel.LayoutOrder = 1
+CountLabel.Parent = AmigosTab
+
+local SearchFrame = Instance.new("Frame")
+SearchFrame.Size = UDim2.new(1, -10, 0, 36)
+SearchFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
+SearchFrame.LayoutOrder = 2
+SearchFrame.Parent = AmigosTab
+
+local SearchCorner = Instance.new("UICorner")
+SearchCorner.CornerRadius = UDim.new(0, 10)
+SearchCorner.Parent = SearchFrame
+
+local SearchBox = Instance.new("TextBox")
+SearchBox.Size = UDim2.new(1, -20, 1, -10)
+SearchBox.Position = UDim2.new(0, 10, 0, 5)
+SearchBox.BackgroundTransparency = 1
+SearchBox.PlaceholderText = "🔍 Buscar jogador..."
+SearchBox.PlaceholderColor3 = Color3.fromRGB(120, 120, 120)
+SearchBox.Text = ""
+SearchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+SearchBox.TextSize = 11
+SearchBox.Font = Enum.Font.Gotham
+SearchBox.Parent = SearchFrame
+
+local ActionFrame = Instance.new("Frame")
+ActionFrame.Size = UDim2.new(1, -10, 0, 35)
+ActionFrame.BackgroundTransparency = 1
+ActionFrame.LayoutOrder = 3
+ActionFrame.Parent = AmigosTab
+
+local AddAllBtn = Instance.new("TextButton")
+AddAllBtn.Size = UDim2.new(0.48, 0, 1, 0)
+AddAllBtn.BackgroundColor3 = Color3.fromRGB(0, 130, 90)
+AddAllBtn.Text = "ADD TODOS"
+AddAllBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+AddAllBtn.TextSize = 10
+AddAllBtn.Font = Enum.Font.GothamBold
+AddAllBtn.Parent = ActionFrame
+
+local ClearAllBtn = Instance.new("TextButton")
+ClearAllBtn.Size = UDim2.new(0.48, 0, 1, 0)
+ClearAllBtn.Position = UDim2.new(0.52, 0, 0, 0)
+ClearAllBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+ClearAllBtn.Text = "LIMPAR TUDO"
+ClearAllBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ClearAllBtn.TextSize = 10
+ClearAllBtn.Font = Enum.Font.GothamBold
+ClearAllBtn.Parent = ActionFrame
+
+local ListFrame = Instance.new("Frame")
+ListFrame.Size = UDim2.new(1, -10, 0, 280)
+ListFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 22)
+ListFrame.LayoutOrder = 4
+ListFrame.Parent = AmigosTab
+
+local ListCorner = Instance.new("UICorner")
+ListCorner.CornerRadius = UDim.new(0, 10)
+ListCorner.Parent = ListFrame
+
+local PlayerList = Instance.new("ScrollingFrame")
+PlayerList.Size = UDim2.new(1, -10, 1, -10)
+PlayerList.Position = UDim2.new(0, 5, 0, 5)
+PlayerList.BackgroundTransparency = 1
+PlayerList.BorderSizePixel = 0
+PlayerList.ScrollBarThickness = 4
+PlayerList.ScrollBarImageColor3 = Color3.fromRGB(180, 0, 255)
+PlayerList.Parent = ListFrame
+
+local PlayerLayout = Instance.new("UIListLayout")
+PlayerLayout.Padding = UDim.new(0, 6)
+PlayerLayout.SortOrder = Enum.SortOrder.Name
+PlayerLayout.Parent = PlayerList
+
+local function UpdateFriendList()
+    local query = SearchBox.Text:lower()
+    for _, child in pairs(PlayerList:GetChildren()) do
+        if child:IsA("Frame") then child:Destroy() end
+    end
+    
+    local count = 0
+    for _ in pairs(Amigos) do count = count + 1 end
+    CountLabel.Text = "⭐ Amigos: " .. count
+    
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            local name = plr.Name
+            if query == "" or name:lower():find(query) then
+                local isFriend = Amigos[name] == true
+                local mesmoTime = EhTime(plr)
+                
+                local Item = Instance.new("Frame")
+                Item.Size = UDim2.new(1, -10, 0, 42)
+                Item.BackgroundColor3 = isFriend and Color3.fromRGB(180, 0, 255) or Color3.fromRGB(20, 20, 32)
+                Item.BackgroundTransparency = isFriend and 0.75 or 0.4
+                Item.Parent = PlayerList
+                
+                local Avatar = Instance.new("Frame")
+                Avatar.Size = UDim2.new(0, 30, 0, 30)
+                Avatar.Position = UDim2.new(0, 8, 0.5, -15)
+                Avatar.BackgroundColor3 = Color3.fromRGB(180, 0, 255)
+                Avatar.BackgroundTransparency = 0.3
+                Avatar.Parent = Item
+                
+                local Initial = Instance.new("TextLabel")
+                Initial.Size = UDim2.new(1, 0, 1, 0)
+                Initial.BackgroundTransparency = 1
+                Initial.Text = name:sub(1, 1):upper()
+                Initial.TextColor3 = Color3.fromRGB(255, 255, 255)
+                Initial.TextSize = 14
+                Initial.Font = Enum.Font.GothamBold
+                Initial.Parent = Avatar
+                
+                local NameLabel = Instance.new("TextLabel")
+                NameLabel.Size = UDim2.new(0.4, 0, 0, 18)
+                NameLabel.Position = UDim2.new(0, 48, 0, 4)
+                NameLabel.BackgroundTransparency = 1
+                NameLabel.Text = name
+                NameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+                NameLabel.TextSize = 11
+                NameLabel.Font = Enum.Font.GothamSemibold
+                NameLabel.TextXAlignment = Enum.TextXAlignment.Left
+                NameLabel.Parent = Item
+                
+                local TeamLabel = Instance.new("TextLabel")
+                TeamLabel.Size = UDim2.new(0.4, 0, 0, 14)
+                TeamLabel.Position = UDim2.new(0, 48, 0, 24)
+                TeamLabel.BackgroundTransparency = 1
+                TeamLabel.Text = mesmoTime and "⚡ MESMO TIME" or (plr.Team and plr.Team.Name or "SEM TIME")
+                TeamLabel.TextColor3 = mesmoTime and Color3.fromRGB(255, 100, 100) or Color3.fromRGB(180, 0, 255)
+                TeamLabel.TextSize = 8
+                TeamLabel.Font = Enum.Font.Gotham
+                TeamLabel.TextXAlignment = Enum.TextXAlignment.Left
+                TeamLabel.Parent = Item
+                
+                local FriendBtn = Instance.new("TextButton")
+                FriendBtn.Size = UDim2.new(0, 55, 0, 26)
+                FriendBtn.Position = UDim2.new(1, -65, 0.5, -13)
+                FriendBtn.BackgroundColor3 = isFriend and Color3.fromRGB(200, 50, 50) or Color3.fromRGB(180, 0, 255)
+                FriendBtn.BackgroundTransparency = 0.5
+                FriendBtn.Text = isFriend and "❌" or "✓"
+                FriendBtn.TextSize = 14
+                FriendBtn.Font = Enum.Font.GothamBold
+                FriendBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                FriendBtn.Parent = Item
+                
+                FriendBtn.MouseButton1Click:Connect(function()
+                    if Amigos[name] then
+                        Amigos[name] = nil
+                    else
+                        Amigos[name] = true
+                    end
+                    UpdateFriendList()
+                end)
+            end
+        end
+    end
+    
+    task.wait()
+    PlayerList.CanvasSize = UDim2.new(0, 0, 0, PlayerLayout.AbsoluteContentSize.Y + 10)
+end
+
+SearchBox:GetPropertyChangedSignal("Text"):Connect(UpdateFriendList)
+AddAllBtn.MouseButton1Click:Connect(function()
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then Amigos[plr.Name] = true end
+    end
+    UpdateFriendList()
+end)
+ClearAllBtn.MouseButton1Click:Connect(function()
+    Amigos = {}
+    UpdateFriendList()
+end)
+Players.PlayerAdded:Connect(function() task.wait(0.5); UpdateFriendList() end)
+Players.PlayerRemoving:Connect(function() task.wait(0.1); UpdateFriendList() end)
+
+CatButtons[1].Btn.BackgroundTransparency = 0.15
+CatButtons[1].Label.TextColor3 = Color3.fromRGB(255, 255, 255)
+CatButtons[1].Content.Visible = true
+
+Main.Visible = true
+Main.Size = UDim2.new(0, 0, 0, 0)
+TweenService:Create(Main, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = UDim2.new(0, 580, 0, 520)}):Play()
+
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == Enum.KeyCode.Insert then
+        Main.Visible = not Main.Visible
+        if Main.Visible and CurrentCat == "AMIGOS" then UpdateFriendList() end
+    end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.MouseButton2 then Mirando = true end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.MouseButton2 then Mirando = false; AlvoAtual = nil end
+end)
+
+print("✅ AIMBOT POTENTE | INSERT")
+]])()
